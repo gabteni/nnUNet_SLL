@@ -127,7 +127,7 @@ class nnUNet_Primus_S_Trainer(AbstractPrimus):
         # this architecture will crash if the patch size is not divisible by 8!
         model = Primus(
             num_input_channels,
-            396,
+            432,
             (8, 8, 8),
             num_output_channels,
             12,
