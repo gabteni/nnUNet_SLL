@@ -6,7 +6,7 @@ from dynamic_network_architectures.architectures.primus import Primus
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.training.nnUNetTrainer.variants.lr_schedule.nnUNetTrainer_warmup import nnUNetTrainer_warmup
 from torch.nn.parallel import DistributedDataParallel as DDP
-from nnunetv2.training.lr_scheduler.warmup import Lin_incr_LRScheduler, PolyLRScheduler_offset
+from nnunetv2.training.lr_scheduler.warmup import Lin_incr_LRScheduler, PolyLRScheduler_offset, Lin_incr_offset_LRScheduler
 from nnunetv2.utilities.helpers import empty_cache, dummy_context
 
 
@@ -318,3 +318,52 @@ class _Primus_L_48_BS1(nnUNet_Primus_L_Trainer):
         plans["configurations"][configuration]["patch_size"] = (48, 48, 48)  # As per repository
         plans["configurations"][configuration]["batch_size"] = 1
         super().__init__(plans, configuration, fold, dataset_json, device)
+
+
+
+class nnUNet_Primus_S_Sawtooth_Trainer(nnUNet_Primus_S_Trainer):
+    def __init__(self, plans, configuration, fold, dataset_json, device=torch.device("cuda")):
+        super().__init__(plans, configuration, fold, dataset_json, device)
+        self.initial_lr = 1e-4
+        self.weight_decay = 5e-2
+        self.warmup_duration_decoder = 50
+        self.warmup_duration_whole_net = 50
+        self.num_epochs = 1000
+        self.training_stage = None
+
+    def on_train_epoch_start(self):
+        if self.current_epoch == 0:
+            self.optimizer, self.lr_scheduler = self._configure('warmup_decoder')
+        elif self.current_epoch == self.warmup_duration_decoder // 2:
+            self.optimizer, self.lr_scheduler = self._configure('train_decoder')
+        elif self.current_epoch == self.warmup_duration_decoder:
+            self.optimizer, self.lr_scheduler = self._configure('warmup_all')
+        elif self.current_epoch == self.warmup_duration_decoder + self.warmup_duration_whole_net:
+            self.optimizer, self.lr_scheduler = self._configure('train')
+        self.network.train()
+        self.lr_scheduler.step(self.current_epoch)
+        self.logger.log('lrs', self.optimizer.param_groups[0]['lr'], self.current_epoch)
+
+    def _configure(self, stage):
+        if self.training_stage == stage:
+            return self.optimizer, self.lr_scheduler
+        net = self.network.module if isinstance(self.network, DDP) else self.network
+        params = net.parameters()
+        heads = net.up_projection.parameters()
+
+        if stage == 'warmup_decoder':
+            opt = torch.optim.SGD(heads, self.initial_lr * 0.01, weight_decay=self.weight_decay, momentum=0.99, nesterov=True)
+            sched = Lin_incr_LRScheduler(opt, self.initial_lr * 0.01, self.warmup_duration_decoder // 2)
+        elif stage == 'train_decoder':
+            opt = self.optimizer if self.training_stage == 'warmup_decoder' else torch.optim.SGD(heads, self.initial_lr, weight_decay=self.weight_decay, momentum=0.99, nesterov=True)
+            sched = PolyLRScheduler_offset(opt, self.initial_lr, self.warmup_duration_decoder, self.warmup_duration_decoder // 2)
+        elif stage == 'warmup_all':
+            opt = torch.optim.SGD(params, self.initial_lr, weight_decay=self.weight_decay, momentum=0.99, nesterov=True)
+            sched = Lin_incr_offset_LRScheduler(opt, self.initial_lr, self.warmup_duration_decoder + self.warmup_duration_whole_net, self.warmup_duration_decoder)
+        else:
+            opt = self.optimizer if self.training_stage == 'warmup_all' else torch.optim.SGD(params, self.initial_lr, weight_decay=self.weight_decay, momentum=0.99, nesterov=True)
+            sched = PolyLRScheduler_offset(opt, self.initial_lr, self.num_epochs, self.warmup_duration_whole_net + self.warmup_duration_decoder)
+
+        self.training_stage = stage
+        empty_cache(self.device)
+        return opt, sched
