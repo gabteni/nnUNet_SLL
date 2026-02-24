@@ -325,6 +325,7 @@ class nnUNet_Primus_S_Sawtooth_Trainer(nnUNet_Primus_S_Trainer):
     def __init__(self, plans, configuration, fold, dataset_json, device=torch.device("cuda")):
         super().__init__(plans, configuration, fold, dataset_json, device)
         self.initial_lr = 1e-4
+        self.warmup_lr_factor = 0.01
         self.weight_decay = 5e-2
         self.warmup_duration_decoder = 50//20
         self.warmup_duration_whole_net = 50//20
