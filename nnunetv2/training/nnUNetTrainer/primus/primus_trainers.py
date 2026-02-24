@@ -326,9 +326,9 @@ class nnUNet_Primus_S_Sawtooth_Trainer(nnUNet_Primus_S_Trainer):
         super().__init__(plans, configuration, fold, dataset_json, device)
         self.initial_lr = 1e-4
         self.weight_decay = 5e-2
-        self.warmup_duration_decoder = 50
-        self.warmup_duration_whole_net = 50
-        self.num_epochs = 1000
+        self.warmup_duration_decoder = 50//20
+        self.warmup_duration_whole_net = 50//20
+        self.num_epochs = 1000//20
         self.training_stage = None
 
     def on_train_epoch_start(self):
@@ -352,17 +352,35 @@ class nnUNet_Primus_S_Sawtooth_Trainer(nnUNet_Primus_S_Trainer):
         heads = net.up_projection.parameters()
 
         if stage == 'warmup_decoder':
-            opt = torch.optim.SGD(heads, self.initial_lr * 0.01, weight_decay=self.weight_decay, momentum=0.99, nesterov=True)
-            sched = Lin_incr_LRScheduler(opt, self.initial_lr * 0.01, self.warmup_duration_decoder // 2)
+            opt = torch.optim.AdamW(heads, self.initial_lr, weight_decay=self.weight_decay,
+                                           amsgrad=False, betas=(0.9, 0.98), fused=True)
+            sched = Lin_incr_LRScheduler(optimizer, self.initial_lr*self.warmup_lr_factor, int(self.warmup_duration_decoder//2))
         elif stage == 'train_decoder':
-            opt = self.optimizer if self.training_stage == 'warmup_decoder' else torch.optim.SGD(heads, self.initial_lr, weight_decay=self.weight_decay, momentum=0.99, nesterov=True)
-            sched = PolyLRScheduler_offset(opt, self.initial_lr, self.warmup_duration_decoder, self.warmup_duration_decoder // 2)
+            if self.training_stage == 'warmup_decoder':
+                # we can keep the existing optimizer and don't need to create a new one. This will allow us to keep
+                # the accumulated momentum terms which already point in a useful driection
+                opt = self.optimizer
+            else:
+                opt = torch.optim.AdamW(heads, self.initial_lr, weight_decay=self.weight_decay,
+                                              amsgrad=False, betas=(0.9, 0.98), fused=True)
+            sched = PolyLRScheduler_offset(optimizer, self.initial_lr*self.warmup_lr_factor, self.warmup_duration_decoder, int(self.warmup_duration_decoder//2))
         elif stage == 'warmup_all':
-            opt = torch.optim.SGD(params, self.initial_lr, weight_decay=self.weight_decay, momentum=0.99, nesterov=True)
-            sched = Lin_incr_offset_LRScheduler(opt, self.initial_lr, self.warmup_duration_decoder + self.warmup_duration_whole_net, self.warmup_duration_decoder)
-        else:
-            opt = self.optimizer if self.training_stage == 'warmup_all' else torch.optim.SGD(params, self.initial_lr, weight_decay=self.weight_decay, momentum=0.99, nesterov=True)
-            sched = PolyLRScheduler_offset(opt, self.initial_lr, self.num_epochs, self.warmup_duration_whole_net + self.warmup_duration_decoder)
+            opt = torch.optim.AdamW(params, self.initial_lr, weight_decay=self.weight_decay,
+                                          amsgrad=False, betas=(0.9, 0.98), fused=True)
+            sched = Lin_incr_offset_LRScheduler(optimizer, self.initial_lr, self.warmup_duration_decoder + self.warmup_duration_whole_net,  self.warmup_duration_decoder)
+        elif stage == 'train':
+            #self.print_to_log_file("train whole net")
+            if self.training_stage == 'warmup_all':
+                #self.print_to_log_file("train whole net, warmup")
+                # we can keep the existing optimizer and don't need to create a new one. This will allow us to keep
+                # the accumulated momentum terms which already point in a useful driection
+                opt = self.optimizer
+            else:
+                #self.print_to_log_file("train whole net, poly lr")
+                opt = torch.optim.AdamW(params, self.initial_lr, weight_decay=self.weight_decay,
+                                              amsgrad=False, betas=(0.9, 0.98), fused=True)
+            sched = PolyLRScheduler_offset(optimizer, self.initial_lr, self.num_epochs, self.warmup_duration_whole_net + self.warmup_duration_decoder)
+            #self.print_to_log_file(f"Initialized train optimizer and lr_scheduler at epoch {self.current_epoch}")
 
         self.training_stage = stage
         empty_cache(self.device)
