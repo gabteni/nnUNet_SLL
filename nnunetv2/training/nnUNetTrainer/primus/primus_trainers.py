@@ -327,11 +327,11 @@ class nnUNet_Primus_S_Sawtooth_Trainer(nnUNet_Primus_S_Trainer):
         self.initial_lr = 1e-4
         self.warmup_lr_factor = 0.01
         self.weight_decay = 5e-2
-        self.warmup_duration_decoder = 50//20
-        self.warmup_duration_whole_net = 50//20
-        self.num_epochs = 1000//20
+        self.warmup_duration_decoder = 50//50
+        self.warmup_duration_whole_net = 50//50
+        self.num_epochs = 1000//300
         self.training_stage = None
-
+        self.configuration_manager.configuration["batch_size"] = 4
     def on_train_epoch_start(self):
         if self.current_epoch == 0:
             self.optimizer, self.lr_scheduler = self._configure('warmup_decoder')
