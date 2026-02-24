@@ -354,7 +354,7 @@ class nnUNet_Primus_S_Sawtooth_Trainer(nnUNet_Primus_S_Trainer):
         if stage == 'warmup_decoder':
             opt = torch.optim.AdamW(heads, self.initial_lr, weight_decay=self.weight_decay,
                                            amsgrad=False, betas=(0.9, 0.98), fused=True)
-            sched = Lin_incr_LRScheduler(optimizer, self.initial_lr*self.warmup_lr_factor, int(self.warmup_duration_decoder//2))
+            sched = Lin_incr_LRScheduler(opt, self.initial_lr*self.warmup_lr_factor, int(self.warmup_duration_decoder//2))
         elif stage == 'train_decoder':
             if self.training_stage == 'warmup_decoder':
                 # we can keep the existing optimizer and don't need to create a new one. This will allow us to keep
@@ -363,11 +363,11 @@ class nnUNet_Primus_S_Sawtooth_Trainer(nnUNet_Primus_S_Trainer):
             else:
                 opt = torch.optim.AdamW(heads, self.initial_lr, weight_decay=self.weight_decay,
                                               amsgrad=False, betas=(0.9, 0.98), fused=True)
-            sched = PolyLRScheduler_offset(optimizer, self.initial_lr*self.warmup_lr_factor, self.warmup_duration_decoder, int(self.warmup_duration_decoder//2))
+            sched = PolyLRScheduler_offset(opt, self.initial_lr*self.warmup_lr_factor, self.warmup_duration_decoder, int(self.warmup_duration_decoder//2))
         elif stage == 'warmup_all':
             opt = torch.optim.AdamW(params, self.initial_lr, weight_decay=self.weight_decay,
                                           amsgrad=False, betas=(0.9, 0.98), fused=True)
-            sched = Lin_incr_offset_LRScheduler(optimizer, self.initial_lr, self.warmup_duration_decoder + self.warmup_duration_whole_net,  self.warmup_duration_decoder)
+            sched = Lin_incr_offset_LRScheduler(opt, self.initial_lr, self.warmup_duration_decoder + self.warmup_duration_whole_net,  self.warmup_duration_decoder)
         elif stage == 'train':
             #self.print_to_log_file("train whole net")
             if self.training_stage == 'warmup_all':
@@ -379,7 +379,7 @@ class nnUNet_Primus_S_Sawtooth_Trainer(nnUNet_Primus_S_Trainer):
                 #self.print_to_log_file("train whole net, poly lr")
                 opt = torch.optim.AdamW(params, self.initial_lr, weight_decay=self.weight_decay,
                                               amsgrad=False, betas=(0.9, 0.98), fused=True)
-            sched = PolyLRScheduler_offset(optimizer, self.initial_lr, self.num_epochs, self.warmup_duration_whole_net + self.warmup_duration_decoder)
+            sched = PolyLRScheduler_offset(opt, self.initial_lr, self.num_epochs, self.warmup_duration_whole_net + self.warmup_duration_decoder)
             #self.print_to_log_file(f"Initialized train optimizer and lr_scheduler at epoch {self.current_epoch}")
 
         self.training_stage = stage
